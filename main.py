@@ -37,6 +37,7 @@ REQ_GUARDAR = 1003
 
 BITS_ORDEN = [78, 79, 82, 81, 80]
 ESPERA_TARJETA = 10
+SECTORES_NECESARIOS = (1, 3)   # los únicos que la app usa (lectura rápida)
 
 TEMAS = {
     "oscuro": dict(
@@ -163,7 +164,7 @@ class Interfaz(BoxLayout):
         self.add_widget(self.estado)
 
         # --- Sector 1 ---
-        self.add_widget(self._lbl("Sector 1 · 5º byte -> bloques 1 y 2 (0-127):",
+        self.add_widget(self._lbl("Sector 1 · 5º byte -> bloques 1 y 2 (0-255):",
                                   dp(24), "14sp"))
         self.sector1_ok = False
         fila = BoxLayout(size_hint_y=None, height=dp(70), spacing=dp(6))
@@ -175,7 +176,7 @@ class Interfaz(BoxLayout):
         fila.add_widget(self._lbl("->", dp(70), "20sp", ancho=dp(24)))
         der = BoxLayout(orientation="vertical")
         der.add_widget(self._lbl("Nuevo", dp(20), "12sp"))
-        self.valor_byte4 = self._campo("0-127")
+        self.valor_byte4 = self._campo("0-255")
         der.add_widget(self.valor_byte4)
         fila.add_widget(der)
         self.add_widget(fila)
@@ -268,7 +269,7 @@ class Interfaz(BoxLayout):
     def _actualizar_botones_top(self):
         self.fila_top.clear_widgets()
         if self.tarjeta_vista:
-            self.fila_top.add_widget(self._boton("Ver .mct", self.ver_mct, dp(52)))
+            self.fila_top.add_widget(self._boton("Seleccionar .mct", self.abrir, dp(52)))
             self.fila_top.add_widget(self._boton("Cargar .keys", self.cargar_keys, dp(52)))
         elif self.contenido is not None:
             self.fila_top.add_widget(self._boton("Cambiar .mct", self.abrir, dp(52)))
@@ -545,14 +546,21 @@ class Interfaz(BoxLayout):
         if res is None:
             return
         nuevo, log = res
-        cambios = logica.diff_bloques(self.contenido, nuevo)
-        if not cambios:
-            self._set_log("No hay bloques modificados que escribir.")
+        # Bloques gestionados por la app (los únicos que escribe): sector 1
+        # bloques 1 y 2, y sector 3 bloque 0. Solo los que existen (hex).
+        dump = logica.DumpMCT(nuevo)
+        objetivo = []
+        for s, i in ((1, 1), (1, 2), (3, 0)):
+            b = dump.get_bloque(s, i)
+            if b and logica.es_hex32(b):
+                objetivo.append((s, i, b))
+        if not objetivo:
+            self._set_log("No hay bloques válidos que escribir.")
             return
         self._nuevo_tras_escribir = nuevo
-        self.bloques_escribir = cambios
+        self.bloques_escribir = objetivo
         self.modo = "escribir"
-        nums = ", ".join(str(logica.bloque_absoluto(s, i)) for s, i, _ in cambios)
+        nums = ", ".join(str(logica.bloque_absoluto(s, i)) for s, i, _ in objetivo)
         self._set_log(f"{log}\n\nAcerca la tarjeta para escribir los bloques {nums}.")
 
     def _claves_a_probar(self):
@@ -607,11 +615,12 @@ class Interfaz(BoxLayout):
         return False
 
     def _leer_tag(self, mc):
+        # La app solo usa los sectores 1 y 3: leer solo esos (mucho más rápido).
         self._ultimo_err = None
         bloques = {}
         sectores_ok = 0
         bloqueados = []
-        for sector in range(logica.SECTORES):
+        for sector in SECTORES_NECESARIOS:
             if self._auth(mc, sector):
                 sectores_ok += 1
                 base = mc.sectorToBlock(sector)
@@ -624,8 +633,6 @@ class Interfaz(BoxLayout):
                         bloques[(sector, indice)] = None
             else:
                 bloqueados.append(sector)
-                for indice in range(logica.BLOQUES_POR_SECTOR):
-                    bloques[(sector, indice)] = None
         self._dump_desde_tag(logica.construir_mct(bloques), sectores_ok, bloqueados)
 
     def _escribir_tag(self, mc):
@@ -686,8 +693,9 @@ class Interfaz(BoxLayout):
     def _dump_desde_tag(self, texto, sectores_ok, bloqueados):
         self.contenido = texto
         self.nombre = "tarjeta_mod.mct"
-        self.estado.text = f"Tarjeta leída: {sectores_ok}/{logica.SECTORES} sectores descifrados."
-        msg = f"Tarjeta leída. {sectores_ok} de {logica.SECTORES} sectores descifrados."
+        total = len(SECTORES_NECESARIOS)
+        self.estado.text = f"Tarjeta leída: sectores 1 y 3 ({sectores_ok}/{total})."
+        msg = f"Tarjeta leída. {sectores_ok} de {total} sectores (1 y 3) descifrados."
         if bloqueados:
             msg += ("\nSin clave (----): sectores " +
                     ", ".join(map(str, bloqueados)) +

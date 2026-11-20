@@ -150,7 +150,7 @@ def procesar_dump(texto, valor_byte4=None, valor_bits=None):
     log = []
 
     if valor_byte4 is not None and str(valor_byte4).strip() != "":
-        valor = leer_entero(valor_byte4, 0, 127)
+        valor = leer_entero(valor_byte4, 0, 255)
         origen = _exigir_bloque(dump, 1, 1)
         nuevo, crc16, crc_byte = aplicar_byte4(origen, valor)
         hexs = nuevo.hex().upper()
