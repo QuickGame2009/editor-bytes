@@ -432,6 +432,10 @@ class Interfaz(BoxLayout):
     def _keys_cargadas(self, contenido):
         self.claves = logica.parse_keys(contenido)
         self.estado.text = f"{len(self.claves)} claves cargadas."
+        if self.nfc_ok:
+            self._set_log("Claves cargadas. Acerca la tarjeta para descifrar los sectores.")
+        else:
+            self._set_log(f"{len(self.claves)} claves cargadas.")
 
     def ver_mct(self, *_):
         if self.contenido is None:
@@ -565,7 +569,7 @@ class Interfaz(BoxLayout):
             try:
                 if self.modo == "escribir":
                     self._escribir_tag(mc)
-                elif self.contenido is None:
+                else:
                     self._leer_tag(mc)
             finally:
                 mc.close()
@@ -596,18 +600,20 @@ class Interfaz(BoxLayout):
 
     def _leer_tag(self, mc):
         bloques = {}
-        leidos = 0
+        sectores_ok = 0
+        bloqueados = []
         for sector in range(logica.SECTORES):
             if self._auth(mc, sector):
+                sectores_ok += 1
                 base = mc.sectorToBlock(sector)
                 for indice in range(logica.BLOQUES_POR_SECTOR):
                     datos = mc.readBlock(base + indice)
                     bloques[(sector, indice)] = bytes((x & 0xFF) for x in datos).hex().upper()
-                    leidos += 1
             else:
+                bloqueados.append(sector)
                 for indice in range(logica.BLOQUES_POR_SECTOR):
                     bloques[(sector, indice)] = None
-        self._dump_desde_tag(logica.construir_mct(bloques), leidos)
+        self._dump_desde_tag(logica.construir_mct(bloques), sectores_ok, bloqueados)
 
     def _escribir_tag(self, mc):
         ok, fallos, errores = 0, [], []
@@ -659,11 +665,16 @@ class Interfaz(BoxLayout):
         self._actualizar_botones_top()
 
     @mainthread
-    def _dump_desde_tag(self, texto, leidos):
+    def _dump_desde_tag(self, texto, sectores_ok, bloqueados):
         self.contenido = texto
         self.nombre = "tarjeta_mod.mct"
-        self.estado.text = f"Tarjeta leída ({leidos} bloques)."
-        self._set_log("Tarjeta importada como dump. Ajusta los valores.")
+        self.estado.text = f"Tarjeta leída: {sectores_ok}/{logica.SECTORES} sectores descifrados."
+        msg = f"Tarjeta leída. {sectores_ok} de {logica.SECTORES} sectores descifrados."
+        if bloqueados:
+            msg += ("\nSin clave (----): sectores " +
+                    ", ".join(map(str, bloqueados)) +
+                    ".\nCarga un .keys con esas claves y vuelve a acercar la tarjeta.")
+        self._set_log(msg)
         self._cargar_estado()
         self._actualizar_botones_top()
 
