@@ -1,7 +1,7 @@
 import os
 
 from kivy.app import App
-from kivy.clock import Clock, mainthread
+from kivy.clock import mainthread
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
@@ -14,9 +14,9 @@ from kivy.uix.textinput import TextInput
 
 import logica
 
-# --- Android: archivos (SAF) y NFC ---
+# --- Android: archivos (SAF) ---
 try:
-    from jnius import autoclass, cast, PythonJavaClass, java_method
+    from jnius import autoclass, cast
     from android import activity
 
     PythonActivity = autoclass("org.kivy.android.PythonActivity")
@@ -25,46 +25,27 @@ try:
     JString = autoclass("java.lang.String")
     InputStreamReader = autoclass("java.io.InputStreamReader")
     BufferedReader = autoclass("java.io.BufferedReader")
-    NfcAdapter = autoclass("android.nfc.NfcAdapter")
-    MifareClassic = autoclass("android.nfc.tech.MifareClassic")
     ANDROID = True
 except Exception:
     ANDROID = False
 
 REQ_ABRIR = 1001
-REQ_KEYS = 1002
 REQ_GUARDAR = 1003
 
 BITS_ORDEN = [78, 79, 82, 81, 80]
-ESPERA_TARJETA = 10
 
 TEMAS = {
     "oscuro": dict(
         fondo=(0.08, 0.08, 0.10, 1), texto=(0.92, 0.92, 0.92, 1),
         caja=(0.12, 0.12, 0.12, 1), caja_txt=(0.80, 1, 0.80, 1),
         in_bg=(0.20, 0.20, 0.23, 1), in_txt=(0.96, 0.96, 0.96, 1),
-        ro_bg=(0.14, 0.14, 0.16, 1), ro_txt=(0.65, 0.75, 0.90, 1),
-        rojo=(1, 0.45, 0.40, 1), verde=(0.45, 0.90, 0.50, 1)),
+        ro_bg=(0.14, 0.14, 0.16, 1), ro_txt=(0.65, 0.75, 0.90, 1)),
     "claro": dict(
         fondo=(0.95, 0.95, 0.96, 1), texto=(0.10, 0.10, 0.10, 1),
         caja=(1, 1, 1, 1), caja_txt=(0.05, 0.25, 0.05, 1),
         in_bg=(1, 1, 1, 1), in_txt=(0, 0, 0, 1),
-        ro_bg=(0.88, 0.88, 0.90, 1), ro_txt=(0.20, 0.30, 0.55, 1),
-        rojo=(0.80, 0.10, 0.05, 1), verde=(0.10, 0.50, 0.15, 1)),
+        ro_bg=(0.88, 0.88, 0.90, 1), ro_txt=(0.20, 0.30, 0.55, 1)),
 }
-
-
-if ANDROID:
-    class _Lector(PythonJavaClass):
-        __javainterfaces__ = ["android/nfc/NfcAdapter$ReaderCallback"]
-
-        def __init__(self, callback):
-            super().__init__()
-            self._callback = callback
-
-        @java_method("(Landroid/nfc/Tag;)V")
-        def onTagDiscovered(self, tag):
-            self._callback(tag)
 
 
 class Almacen:
@@ -127,13 +108,6 @@ class Interfaz(BoxLayout):
         self.contenido = None
         self.nombre = "dump_mod.mct"
         self.tema = "oscuro"
-        self.claves = []
-        self.modo = None
-        self.bloques_escribir = []
-        self.tarjeta_vista = False
-        self.cuenta = ESPERA_TARJETA
-        self._ev_cuenta = None
-        self.nfc_ok = self._nfc_disponible()
 
         self.labels = []
         self.inputs = []
@@ -149,10 +123,6 @@ class Interfaz(BoxLayout):
         self.boton_tema.bind(on_release=self._cambiar_tema)
         cabecera.add_widget(self.boton_tema)
         self.add_widget(cabecera)
-
-        # Línea de estado NFC
-        self.aviso = self._lbl("", dp(24), "14sp")
-        self.add_widget(self.aviso)
 
         # Fila superior (botones según estado)
         self.fila_top = BoxLayout(size_hint_y=None, height=dp(52), spacing=dp(6))
@@ -193,10 +163,7 @@ class Interfaz(BoxLayout):
         self.add_widget(self._fila_bits(self.bits_orig, editable=False))
 
         # Fila inferior
-        self.fila_bot = BoxLayout(size_hint_y=None, height=dp(54), spacing=dp(6))
-        self.fila_bot.add_widget(self._boton("Guardar dump", self.guardar_dump, dp(54)))
-        self.boton_escribir = self._boton("Escribir etiqueta", self.escribir, dp(54))
-        self.add_widget(self.fila_bot)
+        self.add_widget(self._boton("Guardar dump", self.guardar_dump, dp(54)))
 
         # Log desplazable
         self.log_scroll = ScrollView(size_hint_y=1)
@@ -210,18 +177,6 @@ class Interfaz(BoxLayout):
         self.add_widget(self.log_scroll)
 
         self._aplicar_tema()
-
-        if self.nfc_ok:
-            self._set_aviso("buscando")
-            self._ev_cuenta = Clock.schedule_interval(self._tick, 1)
-        else:
-            self._set_aviso("incompat")
-
-        self._lector = _Lector(self._tag_detectada) if ANDROID and self.nfc_ok else None
-        self.activar_lector()
-
-        if os.environ.get("FORZAR_DETECTADA") == "1":
-            self._marcar_detectada_sync()
 
     # --- fábricas ---
     def _lbl(self, texto, alto, fuente, markup=False, ancho=None):
@@ -267,16 +222,13 @@ class Interfaz(BoxLayout):
 
     def _actualizar_botones_top(self):
         self.fila_top.clear_widgets()
-        if self.tarjeta_vista:
-            self.fila_top.add_widget(self._boton("Ver .mct", self.ver_mct, dp(52)))
-            self.fila_top.add_widget(self._boton("Cargar .keys", self.cargar_keys, dp(52)))
-        elif self.contenido is not None:
+        if self.contenido is not None:
             self.fila_top.add_widget(self._boton("Cambiar .mct", self.abrir, dp(52)))
             self.fila_top.add_widget(self._boton("Ver .mct", self.ver_mct, dp(52)))
         else:
             self.fila_top.add_widget(self._boton("Abrir .mct", self.abrir, dp(52)))
 
-    # --- tema / aviso ---
+    # --- tema ---
     def _cambiar_tema(self, *_):
         self.tema = "claro" if self.tema == "oscuro" else "oscuro"
         self._aplicar_tema()
@@ -297,41 +249,6 @@ class Interfaz(BoxLayout):
         for cb in self.checks:
             cb.color = t["texto"]
         self.log.color = t["caja_txt"]
-        self._color_aviso()
-
-    def _set_aviso(self, estado):
-        self.aviso_estado = estado
-        if estado == "buscando":
-            self.aviso.text = f"Buscando tarjeta MIFARE ({self.cuenta})"
-        elif estado == "incompat":
-            self.aviso.text = "Este móvil no es compatible con MIFARE Classic"
-        elif estado == "no_detectada":
-            self.aviso.text = "Tarjeta MIFARE Classic no detectada"
-        elif estado == "archivo":
-            self.aviso.text = "Dump .mct seleccionado"
-        else:
-            self.aviso.text = "Tarjeta MIFARE detectada"
-        self._color_aviso()
-
-    def _color_aviso(self):
-        t = TEMAS[self.tema]
-        estado = getattr(self, "aviso_estado", "buscando")
-        if estado in ("incompat", "no_detectada"):
-            self.aviso.color = t["rojo"]
-        elif estado in ("detectada", "archivo"):
-            self.aviso.color = t["verde"]
-        else:
-            self.aviso.color = t["texto"]
-
-    def _tick(self, dt):
-        if self.tarjeta_vista:
-            return False
-        self.cuenta -= 1
-        if self.cuenta <= 0:
-            self._set_aviso("no_detectada")
-            return False
-        self._set_aviso("buscando")
-        return True
 
     # --- log ---
     def _set_log(self, texto):
@@ -390,48 +307,28 @@ class Interfaz(BoxLayout):
         if ANDROID:
             self.almacen.abrir(REQ_ABRIR, self._archivo_abierto)
         else:
-            self._leer_local("MCT_PATH", self._archivo_abierto)
-
-    def cargar_keys(self, *_):
-        if ANDROID:
-            self.almacen.abrir(REQ_KEYS, self._keys_cargadas)
-        else:
-            self._leer_local("MCT_KEYS", self._keys_cargadas)
-
-    def _leer_local(self, var, cb):
-        ruta = os.environ.get(var, "")
-        try:
-            with open(ruta, encoding="utf-8") as f:
-                cb(f.read())
-            if var == "MCT_PATH":
+            ruta = os.environ.get("MCT_PATH", "")
+            try:
+                with open(ruta, encoding="utf-8") as f:
+                    self._archivo_abierto(f.read())
                 base = ruta.rsplit("/", 1)[-1].rsplit(".", 1)[0]
                 self.nombre = base + "_mod.mct"
-        except OSError as e:
-            self._set_log(f"No se pudo abrir: {e}")
+            except OSError as e:
+                self._set_log(f"No se pudo abrir: {e}")
 
     @mainthread
     def _archivo_abierto(self, contenido):
         self.contenido = contenido
         try:
             n = len(logica.DumpMCT(contenido).bloques)
-            self.estado.text = f"Dump cargado ({n} bloques)."
+            self.estado.text = f"Dump .mct seleccionado ({n} bloques)."
             self._set_log("Dump cargado. Ajusta los valores.")
             self._cargar_estado()
-            if not self.tarjeta_vista:
-                if self._ev_cuenta:
-                    self._ev_cuenta.cancel()
-                    self._ev_cuenta = None
-                self._set_aviso("archivo")
         except ValueError as e:
             self.contenido = None
             self.estado.text = "Archivo no válido."
             self._set_log(f"Error: {e}")
         self._actualizar_botones_top()
-
-    @mainthread
-    def _keys_cargadas(self, contenido):
-        self.claves = logica.parse_keys(contenido)
-        self.estado.text = f"{len(self.claves)} claves cargadas."
 
     def ver_mct(self, *_):
         if self.contenido is None:
@@ -468,7 +365,7 @@ class Interfaz(BoxLayout):
 
     def _procesar(self):
         if self.contenido is None:
-            self._set_log("Primero abre o importa un dump.")
+            self._set_log("Primero abre un dump.")
             return None
         valor_bits = self.valor_bits_actual() if self.sector3_ok else None
         try:
@@ -500,177 +397,12 @@ class Interfaz(BoxLayout):
     def _guardado(self):
         self._add_log("\n\nGuardado correctamente.")
 
-    # --- NFC ---
-    def _nfc_disponible(self):
-        forzar = os.environ.get("FORZAR_NFC")
-        if forzar in ("0", "1"):
-            return forzar == "1"
-        if not ANDROID:
-            return False
-        try:
-            act = cast("android.app.Activity", PythonActivity.mActivity)
-            adaptador = NfcAdapter.getDefaultAdapter(act)
-            pm = act.getPackageManager()
-            return adaptador is not None and pm.hasSystemFeature("com.nxp.mifare")
-        except Exception:
-            return False
-
-    def activar_lector(self):
-        if not (ANDROID and self.nfc_ok and self._lector):
-            return
-        try:
-            act = cast("android.app.Activity", PythonActivity.mActivity)
-            adaptador = NfcAdapter.getDefaultAdapter(act)
-            flags = (NfcAdapter.FLAG_READER_NFC_A |
-                     NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK)
-            adaptador.enableReaderMode(act, self._lector, flags, None)
-        except Exception:
-            pass
-
-    def desactivar_lector(self):
-        if not (ANDROID and self.nfc_ok):
-            return
-        try:
-            act = cast("android.app.Activity", PythonActivity.mActivity)
-            NfcAdapter.getDefaultAdapter(act).disableReaderMode(act)
-        except Exception:
-            pass
-
-    def escribir(self, *_):
-        res = self._procesar()
-        if res is None:
-            return
-        nuevo, log = res
-        cambios = logica.diff_bloques(self.contenido, nuevo)
-        if not cambios:
-            self._set_log("No hay bloques modificados que escribir.")
-            return
-        self._nuevo_tras_escribir = nuevo
-        self.bloques_escribir = cambios
-        self.modo = "escribir"
-        nums = ", ".join(str(logica.bloque_absoluto(s, i)) for s, i, _ in cambios)
-        self._set_log(f"{log}\n\nAcerca la tarjeta para escribir los bloques {nums}.")
-
-    def _claves_a_probar(self):
-        return self.claves if self.claves else logica.CLAVES_DEFECTO
-
-    def _tag_detectada(self, tag):
-        self._marcar_detectada()
-        try:
-            mc = MifareClassic.get(tag)
-            if mc is None:
-                self._log("La tarjeta no es MIFARE Classic.")
-                return
-            mc.connect()
-            try:
-                if self.modo == "escribir":
-                    self._escribir_tag(mc)
-                elif self.contenido is None:
-                    self._leer_tag(mc)
-            finally:
-                mc.close()
-        except Exception as e:
-            self._log(f"Error con la tarjeta: {e}")
-        finally:
-            self.modo = None
-
-    def _auth(self, mc, sector):
-        for clave in self._claves_a_probar():
-            try:
-                if mc.authenticateSectorWithKeyA(sector, clave):
-                    return True
-            except Exception:
-                pass
-        for clave in self._claves_a_probar():
-            try:
-                if mc.authenticateSectorWithKeyB(sector, clave):
-                    return True
-            except Exception:
-                pass
-        return False
-
-    def _leer_tag(self, mc):
-        bloques = {}
-        leidos = 0
-        for sector in range(logica.SECTORES):
-            if self._auth(mc, sector):
-                base = mc.sectorToBlock(sector)
-                for indice in range(logica.BLOQUES_POR_SECTOR):
-                    datos = mc.readBlock(base + indice)
-                    bloques[(sector, indice)] = bytes((x & 0xFF) for x in datos).hex().upper()
-                    leidos += 1
-            else:
-                for indice in range(logica.BLOQUES_POR_SECTOR):
-                    bloques[(sector, indice)] = None
-        self._dump_desde_tag(logica.construir_mct(bloques), leidos)
-
-    def _escribir_tag(self, mc):
-        ok, fallos = 0, []
-        for sector, indice, hexs in self.bloques_escribir:
-            if logica.es_trailer(indice):
-                continue
-            abs_b = logica.bloque_absoluto(sector, indice)
-            if self._auth(mc, sector):
-                try:
-                    mc.writeBlock(abs_b, bytes.fromhex(hexs))
-                    ok += 1
-                except Exception:
-                    fallos.append(abs_b)
-            else:
-                fallos.append(abs_b)
-        self.contenido = self._nuevo_tras_escribir
-        self._fin_escritura(ok, fallos)
-
-    @mainthread
-    def _marcar_detectada(self):
-        self._marcar_detectada_sync()
-
-    def _marcar_detectada_sync(self):
-        self.tarjeta_vista = True
-        if self._ev_cuenta:
-            self._ev_cuenta.cancel()
-            self._ev_cuenta = None
-        self._set_aviso("detectada")
-        if self.boton_escribir.parent is None:
-            self.fila_bot.add_widget(self.boton_escribir)
-        self._actualizar_botones_top()
-
-    @mainthread
-    def _dump_desde_tag(self, texto, leidos):
-        self.contenido = texto
-        self.nombre = "tarjeta_mod.mct"
-        self.estado.text = f"Tarjeta leída ({leidos} bloques)."
-        self._set_log("Tarjeta importada como dump. Ajusta los valores.")
-        self._cargar_estado()
-        self._actualizar_botones_top()
-
-    @mainthread
-    def _fin_escritura(self, ok, fallos):
-        msg = f"Escritos {ok} bloques."
-        if fallos:
-            msg += f" Fallaron (sin clave o error): {', '.join(map(str, fallos))}."
-        self._add_log("\n\n" + msg)
-        self._cargar_estado()
-
-    @mainthread
-    def _log(self, texto):
-        self._set_log(texto)
-
 
 class EditorMctApp(App):
     title = "Editor de Bytes"
 
     def build(self):
-        self.interfaz = Interfaz()
-        return self.interfaz
-
-    def on_resume(self):
-        self.interfaz.activar_lector()
-        return True
-
-    def on_pause(self):
-        self.interfaz.desactivar_lector()
-        return True
+        return Interfaz()
 
 
 if __name__ == "__main__":
