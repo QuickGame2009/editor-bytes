@@ -578,27 +578,36 @@ class Interfaz(BoxLayout):
         finally:
             self.modo = None
 
-    @staticmethod
-    def _a_jbyte(datos):
-        # pyjnius necesita un byte[] con valores con signo (-128..127).
-        return [b - 256 if b > 127 else b for b in datos]
+    def _reconectar(self, mc):
+        # Una autenticacion fallida deja la tarjeta "colgada"; hay que reconectar.
+        try:
+            mc.close()
+        except Exception:
+            pass
+        try:
+            mc.connect()
+        except Exception:
+            pass
 
     def _auth(self, mc, sector):
         for clave in self._claves_a_probar():
-            jk = self._a_jbyte(clave)
+            k = bytes(clave)
             try:
-                if mc.authenticateSectorWithKeyA(sector, jk):
+                if mc.authenticateSectorWithKeyA(sector, k):
                     return True
-            except Exception:
-                pass
+            except Exception as e:
+                self._ultimo_err = str(e)
+            self._reconectar(mc)
             try:
-                if mc.authenticateSectorWithKeyB(sector, jk):
+                if mc.authenticateSectorWithKeyB(sector, k):
                     return True
-            except Exception:
-                pass
+            except Exception as e:
+                self._ultimo_err = str(e)
+            self._reconectar(mc)
         return False
 
     def _leer_tag(self, mc):
+        self._ultimo_err = None
         bloques = {}
         sectores_ok = 0
         bloqueados = []
@@ -607,8 +616,12 @@ class Interfaz(BoxLayout):
                 sectores_ok += 1
                 base = mc.sectorToBlock(sector)
                 for indice in range(logica.BLOQUES_POR_SECTOR):
-                    datos = mc.readBlock(base + indice)
-                    bloques[(sector, indice)] = bytes((x & 0xFF) for x in datos).hex().upper()
+                    try:
+                        datos = mc.readBlock(base + indice)
+                        bloques[(sector, indice)] = bytes((x & 0xFF) for x in datos).hex().upper()
+                    except Exception as e:
+                        self._ultimo_err = str(e)
+                        bloques[(sector, indice)] = None
             else:
                 bloqueados.append(sector)
                 for indice in range(logica.BLOQUES_POR_SECTOR):
@@ -621,18 +634,22 @@ class Interfaz(BoxLayout):
             if logica.es_trailer(indice):
                 continue
             abs_b = logica.bloque_absoluto(sector, indice)
-            datos = self._a_jbyte(bytes.fromhex(hexs))
+            datos = bytes.fromhex(hexs)
             escrito = False
             ultimo = "ninguna clave autentica el sector"
             for clave in self._claves_a_probar():
-                jk = self._a_jbyte(clave)
-                for nombre, metodo in (("A", mc.authenticateSectorWithKeyA),
-                                       ("B", mc.authenticateSectorWithKeyB)):
+                k = bytes(clave)
+                for nombre, usar_b in (("A", False), ("B", True)):
                     try:
-                        if not metodo(sector, jk):
-                            continue
+                        if usar_b:
+                            autenticado = mc.authenticateSectorWithKeyB(sector, k)
+                        else:
+                            autenticado = mc.authenticateSectorWithKeyA(sector, k)
                     except Exception as e:
                         ultimo = f"auth {nombre}: {e}"
+                        autenticado = False
+                    if not autenticado:
+                        self._reconectar(mc)
                         continue
                     try:
                         mc.writeBlock(abs_b, datos)
@@ -640,6 +657,7 @@ class Interfaz(BoxLayout):
                         break
                     except Exception as e:
                         ultimo = f"clave {nombre} ({clave.hex().upper()}): {e}"
+                        self._reconectar(mc)
                 if escrito:
                     break
             if escrito:
@@ -674,6 +692,11 @@ class Interfaz(BoxLayout):
             msg += ("\nSin clave (----): sectores " +
                     ", ".join(map(str, bloqueados)) +
                     ".\nCarga un .keys con esas claves y vuelve a acercar la tarjeta.")
+        if sectores_ok == 0:
+            if getattr(self, "_ultimo_err", None):
+                msg += f"\n(Detalle: {self._ultimo_err})"
+            elif not self.claves:
+                msg += "\n(No cargaste .keys: se probaron claves por defecto, que solo valen en tarjetas vírgenes.)"
         self._set_log(msg)
         self._cargar_estado()
         self._actualizar_botones_top()
