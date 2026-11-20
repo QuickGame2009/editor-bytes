@@ -30,6 +30,10 @@ except Exception:
 REQ_ABRIR = 1001
 REQ_GUARDAR = 1002
 
+# Orden de las casillas en pantalla (izquierda -> derecha).
+# El valor de cada bit no depende de esta posición: bit 78 = LSB ... bit 82 = MSB.
+BITS_ORDEN = [78, 79, 82, 81, 80]
+
 TEMAS = {
     "oscuro": dict(
         fondo=(0.08, 0.08, 0.10, 1), texto=(0.92, 0.92, 0.92, 1),
@@ -145,8 +149,8 @@ class Interfaz(BoxLayout):
         # --- Sector 3: casillas editables + original en solo lectura ---
         self.add_widget(self._lbl("Sector 3 · bloque 0 · bits 78-82:", dp(24), "14sp"))
         self.sector3_ok = False
-        self.bits_cb = []      # editables (nuevo)
-        self.bits_orig = []    # solo lectura (original)
+        self.bits_cb = {}      # bit -> casilla editable (nuevo)
+        self.bits_orig = {}    # bit -> casilla solo lectura (original)
         self.add_widget(self._fila_bits(self.bits_cb, editable=True))
         self.resumen_bits = self._lbl("Abre un dump para activar las casillas.",
                                       dp(22), "13sp")
@@ -193,13 +197,13 @@ class Interfaz(BoxLayout):
 
     def _fila_bits(self, destino, editable):
         fila = BoxLayout(size_hint_y=None, height=dp(60), spacing=dp(4))
-        for numero in (82, 81, 80, 79, 78):
+        for numero in BITS_ORDEN:
             celda = BoxLayout(orientation="vertical")
             celda.add_widget(self._lbl(f"bit {numero}", dp(20), "12sp"))
             cb = CheckBox(disabled=True)
             if editable:
                 cb.bind(active=lambda *_: self._resumen_bits())
-            destino.append(cb)
+            destino[numero] = cb
             self.checks.append(cb)
             celda.add_widget(cb)
             fila.add_widget(celda)
@@ -231,9 +235,9 @@ class Interfaz(BoxLayout):
     # --- sector 3 ---
     def valor_bits_actual(self):
         valor = 0
-        for i, cb in enumerate(self.bits_cb):
+        for numero, cb in self.bits_cb.items():
             if cb.active:
-                valor |= (16 >> i)
+                valor |= (1 << (numero - 78))
         return valor
 
     def _resumen_bits(self):
@@ -259,16 +263,16 @@ class Interfaz(BoxLayout):
         b3 = dump.get_bloque(3, 0)
         if b3 is not None and b3.strip("-") != "":
             valor = logica.valor_bits_de_bloque(logica._bloque_a_bytes(b3))
-            for i, cb in enumerate(self.bits_cb):
+            for numero, cb in self.bits_cb.items():
                 cb.disabled = False
-                cb.active = bool((valor >> (4 - i)) & 1)
-            for i, cb in enumerate(self.bits_orig):
-                cb.active = bool((valor >> (4 - i)) & 1)
+                cb.active = bool(valor & (1 << (numero - 78)))
+            for numero, cb in self.bits_orig.items():
+                cb.active = bool(valor & (1 << (numero - 78)))
             self.sector3_ok = True
             self._resumen_bits()
         else:
             self.sector3_ok = False
-            for cb in self.bits_cb + self.bits_orig:
+            for cb in list(self.bits_cb.values()) + list(self.bits_orig.values()):
                 cb.active = False
                 cb.disabled = True
             self.resumen_bits.text = "Sector 3, bloque 0 sin leer: no se puede editar."
