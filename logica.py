@@ -46,10 +46,13 @@ def calcular_crc16(datos):
     return crc & 0xFFFF
 
 
+IDX_VALOR = 4   # índice 0-based donde se escribe el valor (5º byte del bloque)
+
+
 def aplicar_byte4(bloque_bytes, valor):
-    """Escribe el valor (0-63) en el byte 4 y el CRC plegado en el byte 16."""
+    """Escribe el valor (0-63) en el 5º byte y el CRC plegado en el byte 16."""
     b = bytearray(bloque_bytes)
-    b[3] = valor
+    b[IDX_VALOR] = valor
     crc16 = calcular_crc16(b[:15])
     crc_byte = (crc16 & 0xFF) ^ ((crc16 >> 8) & 0xFF)
     b[15] = crc_byte
@@ -138,8 +141,8 @@ def procesar_dump(texto, valor_byte4=None, valor_bits=None):
         hexs = nuevo.hex().upper()
         dump.set_bloque(1, 1, hexs)
         dump.set_bloque(1, 2, hexs)
-        log.append("== Sector 1 · byte 4 + CRC ==")
-        log.append(f"Byte 4: {valor} decimal = 0x{valor:02X}")
+        log.append("== Sector 1 · 5º byte + CRC ==")
+        log.append(f"Valor: {valor} decimal = 0x{valor:02X} (5º byte)")
         log.append(f"CRC16: 0x{crc16:04X}   CRC plegado: 0x{crc_byte:02X}")
         log.append("Escrito en sector 1, bloques 1 y 2:")
         log.append(" ".join(f"{b:02X}" for b in nuevo))
