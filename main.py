@@ -143,7 +143,7 @@ class Interfaz(BoxLayout):
         self.add_widget(fila)
 
         # --- Sector 3: casillas editables + original en solo lectura ---
-        self.add_widget(self._lbl("Sector 3 · bloque 0 · 5 bits:", dp(24), "14sp"))
+        self.add_widget(self._lbl("Sector 3 · bloque 0 · bits 78-82:", dp(24), "14sp"))
         self.sector3_ok = False
         self.bits_cb = []      # editables (nuevo)
         self.bits_orig = []    # solo lectura (original)
@@ -193,7 +193,7 @@ class Interfaz(BoxLayout):
 
     def _fila_bits(self, destino, editable):
         fila = BoxLayout(size_hint_y=None, height=dp(60), spacing=dp(4))
-        for numero in range(1, 6):
+        for numero in (82, 81, 80, 79, 78):
             celda = BoxLayout(orientation="vertical")
             celda.add_widget(self._lbl(f"bit {numero}", dp(20), "12sp"))
             cb = CheckBox(disabled=True)

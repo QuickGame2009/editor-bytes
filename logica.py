@@ -59,23 +59,34 @@ def aplicar_byte4(bloque_bytes, valor):
     return b, crc16, crc_byte
 
 
-# Campo de 5 bits, desplazado un byte respecto a la numeración 78-82
-# (igual que el valor del sector 1, que pasó del 4º al 5º byte).
-DESP_BITS = 128 - 82 - 8
+# Campo de 5 bits, little-endian por bit: bit 78 = LSB (vale 1), bit 82 = MSB (vale 16).
+# Cada bit del valor -> (byte del bloque, bit dentro del byte; bit 0 = 0x01).
+#   valor bit 0 (bit 78) -> byte 9,  bit 5  (0x20)
+#   valor bit 1 (bit 79) -> byte 9,  bit 6  (0x40)
+#   valor bit 2 (bit 80) -> byte 9,  bit 7  (0x80)
+#   valor bit 3 (bit 81) -> byte 10, bit 0  (0x01)
+#   valor bit 4 (bit 82) -> byte 10, bit 1  (0x02)
+MAPEO_BITS = [(9, 5), (9, 6), (9, 7), (10, 0), (10, 1)]
 
 
 def valor_bits_de_bloque(bloque_bytes):
-    """Devuelve el valor actual (0-31) del campo de 5 bits del bloque."""
-    numero = int.from_bytes(bloque_bytes, byteorder="big")
-    return (numero >> DESP_BITS) & 0b11111
+    """Devuelve el valor actual (0-31) del campo de 5 bits (bits 78-82)."""
+    valor = 0
+    for i, (by, bit) in enumerate(MAPEO_BITS):
+        if bloque_bytes[by] & (1 << bit):
+            valor |= (1 << i)
+    return valor
 
 
 def aplicar_bits(bloque_bytes, valor):
-    """Escribe el valor (0-31) en el campo de 5 bits del bloque de 128 bits."""
-    numero = int.from_bytes(bloque_bytes, byteorder="big")
-    mascara = 0b11111 << DESP_BITS
-    numero = (numero & ~mascara) | (valor << DESP_BITS)
-    return bytearray(numero.to_bytes(16, byteorder="big"))
+    """Escribe el valor (0-31) en el campo de 5 bits (bits 78-82)."""
+    b = bytearray(bloque_bytes)
+    for i, (by, bit) in enumerate(MAPEO_BITS):
+        if (valor >> i) & 1:
+            b[by] |= (1 << bit)
+        else:
+            b[by] &= ~(1 << bit)
+    return b
 
 
 # ---------- Parseo del dump .mct ----------
