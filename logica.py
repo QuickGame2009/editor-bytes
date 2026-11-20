@@ -56,6 +56,12 @@ def aplicar_byte4(bloque_bytes, valor):
     return b, crc16, crc_byte
 
 
+def valor_bits_de_bloque(bloque_bytes):
+    """Devuelve el valor actual (0-31) de los bits 78-82 del bloque."""
+    numero = int.from_bytes(bloque_bytes, byteorder="big")
+    return (numero >> (128 - 82)) & 0b11111
+
+
 def aplicar_bits(bloque_bytes, valor):
     """Escribe el valor (0-31) en los bits 78-82 del bloque de 128 bits."""
     numero = int.from_bytes(bloque_bytes, byteorder="big")

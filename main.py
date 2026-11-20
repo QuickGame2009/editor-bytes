@@ -3,6 +3,7 @@ from kivy.clock import mainthread
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
+from kivy.uix.checkbox import CheckBox
 from kivy.uix.label import Label
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
@@ -109,9 +110,23 @@ class Interfaz(BoxLayout):
         self.valor_byte4 = self._campo("0-63")
         self.add_widget(self.valor_byte4)
 
-        self.add_widget(self._etiqueta("Sector 3 - bloque 0 - bits 78-82 (0-31):"))
-        self.valor_bits = self._campo("0-31")
-        self.add_widget(self.valor_bits)
+        self.add_widget(self._etiqueta("Sector 3 - bloque 0 - bits 78-82:"))
+        self.sector3_ok = False
+        self.bits_cb = []          # índice 0 = bit 78 (más significativo)
+        fila = BoxLayout(size_hint_y=None, height=dp(64), spacing=dp(4))
+        for i, numero in enumerate((78, 79, 80, 81, 82)):
+            celda = BoxLayout(orientation="vertical")
+            celda.add_widget(Label(text=f"bit {numero}", font_size="13sp",
+                                   size_hint_y=None, height=dp(22)))
+            cb = CheckBox(disabled=True)
+            cb.bind(active=lambda *_: self._resumen_bits())
+            self.bits_cb.append(cb)
+            celda.add_widget(cb)
+            fila.add_widget(celda)
+        self.add_widget(fila)
+        self.resumen_bits = Label(text="Abre un dump para activar las casillas.",
+                                  size_hint_y=None, height=dp(24), font_size="13sp")
+        self.add_widget(self.resumen_bits)
 
         self.add_widget(self._boton("2 · Aplicar y guardar", self.aplicar))
 
@@ -142,6 +157,39 @@ class Interfaz(BoxLayout):
                         input_filter="int", input_type="number",
                         hint_text=pista, font_size="17sp")
 
+    # --- bits del sector 3 ---
+    def valor_bits_actual(self):
+        valor = 0
+        for i, cb in enumerate(self.bits_cb):
+            if cb.active:
+                valor |= (16 >> i)
+        return valor
+
+    def _resumen_bits(self):
+        if not self.sector3_ok:
+            return
+        v = self.valor_bits_actual()
+        self.resumen_bits.text = f"Valor = {v}  ({format(v, '05b')} binario)"
+
+    def _cargar_bits(self):
+        try:
+            dump = logica.DumpMCT(self.contenido)
+            bloque = dump.get_bloque(3, 0)
+            if bloque is None or bloque.strip("-") == "":
+                raise ValueError
+            valor = logica.valor_bits_de_bloque(logica._bloque_a_bytes(bloque))
+            for i, cb in enumerate(self.bits_cb):
+                cb.disabled = False
+                cb.active = bool((valor >> (4 - i)) & 1)
+            self.sector3_ok = True
+            self._resumen_bits()
+        except ValueError:
+            self.sector3_ok = False
+            for cb in self.bits_cb:
+                cb.active = False
+                cb.disabled = True
+            self.resumen_bits.text = "Sector 3, bloque 0 sin leer: no se puede editar."
+
     # --- acciones ---
     def abrir(self, *_):
         if ANDROID:
@@ -161,7 +209,8 @@ class Interfaz(BoxLayout):
         try:
             n = len(logica.DumpMCT(contenido).bloques)
             self.estado.text = f"Archivo cargado ({n} bloques)."
-            self.salida.text = "Archivo .mct cargado. Introduce los valores y pulsa guardar."
+            self.salida.text = "Archivo .mct cargado. Ajusta los valores y pulsa guardar."
+            self._cargar_bits()
         except ValueError as e:
             self.contenido = None
             self.estado.text = "Archivo no válido."
@@ -171,11 +220,12 @@ class Interfaz(BoxLayout):
         if self.contenido is None:
             self.salida.text = "Primero abre un archivo .mct."
             return
+        valor_bits = self.valor_bits_actual() if self.sector3_ok else None
         try:
             nuevo, log = logica.procesar_dump(
                 self.contenido,
                 valor_byte4=self.valor_byte4.text,
-                valor_bits=self.valor_bits.text,
+                valor_bits=valor_bits,
             )
         except ValueError as e:
             self.salida.text = f"Error: {e}"
