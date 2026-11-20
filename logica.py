@@ -178,3 +178,67 @@ def procesar_dump(texto, valor_byte4=None, valor_bits=None):
         raise ValueError("no has introducido ningún valor para modificar.")
 
     return dump.texto(), "\n".join(log)
+
+
+# ---------- MIFARE Classic 1K: claves, bloques y volcados ----------
+
+SECTORES = 16
+BLOQUES_POR_SECTOR = 4
+
+# Claves por defecto que se prueban si no se carga un .keys.
+CLAVES_DEFECTO = [
+    bytes.fromhex(k) for k in (
+        "FFFFFFFFFFFF", "A0A1A2A3A4A5", "D3F7D3F7D3F7", "000000000000",
+        "B0B1B2B3B4B5", "4D3A99C351DD", "1A982C7E459A", "AABBCCDDEEFF",
+    )
+]
+
+
+def parse_keys(texto):
+    """Lee un .keys (MIFARE Classic Tool): una clave hex de 12 dígitos por línea."""
+    claves = []
+    vistas = set()
+    for linea in texto.splitlines():
+        l = linea.strip().replace(" ", "")
+        if not l or l.startswith("#"):
+            continue
+        if len(l) == 12 and re.fullmatch(r"[0-9A-Fa-f]{12}", l):
+            k = bytes.fromhex(l)
+            if k not in vistas:
+                vistas.add(k)
+                claves.append(k)
+    return claves
+
+
+def bloque_absoluto(sector, indice):
+    """Número de bloque absoluto en una tarjeta de 1K."""
+    return sector * BLOQUES_POR_SECTOR + indice
+
+
+def es_trailer(indice):
+    """El último bloque de cada sector (claves y bits de acceso)."""
+    return indice == BLOQUES_POR_SECTOR - 1
+
+
+def diff_bloques(orig_texto, nuevo_texto):
+    """Bloques que cambian entre dos volcados: lista de (sector, indice, hex)."""
+    o = DumpMCT(orig_texto)
+    n = DumpMCT(nuevo_texto)
+    cambios = []
+    for (sector, indice) in sorted(n.bloques):
+        bo = o.get_bloque(sector, indice)
+        bn = n.get_bloque(sector, indice)
+        if bn is not None and es_hex32(bn) and bo != bn:
+            cambios.append((sector, indice, bn))
+    return cambios
+
+
+def construir_mct(bloques):
+    """Crea el texto de un .mct desde {(sector, indice): hex o None}."""
+    lineas = []
+    for sector in range(SECTORES):
+        lineas.append(f"+Sector: {sector}")
+        for indice in range(BLOQUES_POR_SECTOR):
+            hexs = bloques.get((sector, indice))
+            lineas.append(hexs.upper() if hexs else DESCONOCIDO)
+    return "\n".join(lineas)
