@@ -35,12 +35,12 @@ TEMAS = {
         fondo=(0.08, 0.08, 0.10, 1), texto=(0.92, 0.92, 0.92, 1),
         caja=(0.12, 0.12, 0.12, 1), caja_txt=(0.80, 1, 0.80, 1),
         in_bg=(0.20, 0.20, 0.23, 1), in_txt=(0.96, 0.96, 0.96, 1),
-        mono=(0.70, 0.85, 1, 1)),
+        ro_bg=(0.14, 0.14, 0.16, 1), ro_txt=(0.65, 0.75, 0.90, 1)),
     "claro": dict(
         fondo=(0.95, 0.95, 0.96, 1), texto=(0.10, 0.10, 0.10, 1),
         caja=(1, 1, 1, 1), caja_txt=(0.05, 0.25, 0.05, 1),
         in_bg=(1, 1, 1, 1), in_txt=(0, 0, 0, 1),
-        mono=(0.10, 0.25, 0.55, 1)),
+        ro_bg=(0.88, 0.88, 0.90, 1), ro_txt=(0.20, 0.30, 0.55, 1)),
 }
 
 
@@ -106,8 +106,8 @@ class Interfaz(BoxLayout):
         self.tema = "oscuro"
 
         self.labels = []
-        self.inputs = []
-        self.monos = []
+        self.inputs = []       # editables
+        self.readonly = []     # solo lectura
         self.checks = []
 
         # Cabecera: título + botón de modo nocturno
@@ -124,30 +124,26 @@ class Interfaz(BoxLayout):
         self.estado = self._lbl("Ningún archivo abierto.", dp(28), "14sp")
         self.add_widget(self.estado)
 
-        # --- Sector 1 ---
-        self.add_widget(self._lbl("Sector 1 · 5º byte -> bloques 1 y 2 (0-63):",
+        # --- Sector 1: valor original (solo lectura) -> valor nuevo ---
+        self.add_widget(self._lbl("Sector 1 · 5º byte -> bloques 1 y 2 (0-127):",
                                   dp(24), "14sp"))
-        self.valor_byte4 = self._campo("0-63")
-        self.valor_byte4.bind(text=self._actualizar_sector1)
-        self.add_widget(self.valor_byte4)
-
-        comp = BoxLayout(size_hint_y=None, height=dp(78), spacing=dp(4))
+        self.sector1_ok = False
+        fila = BoxLayout(size_hint_y=None, height=dp(72), spacing=dp(6))
         izq = BoxLayout(orientation="vertical")
         izq.add_widget(self._lbl("Original (dump)", dp(20), "12sp"))
-        self.mono_orig = self._mono()
-        izq.add_widget(self.mono_orig)
-        comp.add_widget(izq)
-        comp.add_widget(self._lbl("->", dp(78), "16sp", ancho=dp(22)))
+        self.valor_orig = self._caja_ro()
+        izq.add_widget(self.valor_orig)
+        fila.add_widget(izq)
+        fila.add_widget(self._lbl("->", dp(72), "20sp", ancho=dp(24)))
         der = BoxLayout(orientation="vertical")
         der.add_widget(self._lbl("Nuevo", dp(20), "12sp"))
-        self.mono_nuevo = self._mono()
-        der.add_widget(self.mono_nuevo)
-        comp.add_widget(der)
-        self.add_widget(comp)
+        self.valor_byte4 = self._campo("0-127")
+        der.add_widget(self.valor_byte4)
+        fila.add_widget(der)
+        self.add_widget(fila)
 
-        # --- Sector 3 ---
-        self.add_widget(self._lbl("Sector 3 · bloque 0 · bits 78-82:",
-                                  dp(24), "14sp"))
+        # --- Sector 3: casillas editables + original en solo lectura ---
+        self.add_widget(self._lbl("Sector 3 · bloque 0 · 5 bits:", dp(24), "14sp"))
         self.sector3_ok = False
         self.bits_cb = []      # editables (nuevo)
         self.bits_orig = []    # solo lectura (original)
@@ -163,7 +159,6 @@ class Interfaz(BoxLayout):
         # --- Log: caja fija, solo se desplaza el texto ---
         self.salida = TextInput(readonly=True, font_name="RobotoMono-Regular",
                                 font_size="13sp", size_hint_y=1)
-        self.inputs_salida = self.salida
         self.add_widget(self.salida)
 
         self._aplicar_tema()
@@ -186,20 +181,19 @@ class Interfaz(BoxLayout):
     def _campo(self, pista):
         t = TextInput(multiline=False, size_hint_y=None, height=dp(46),
                       input_filter="int", input_type="number",
-                      hint_text=pista, font_size="17sp")
+                      hint_text=pista, font_size="18sp")
         self.inputs.append(t)
         return t
 
-    def _mono(self):
-        l = Label(text="--", font_name="RobotoMono-Regular", font_size="12sp",
-                  halign="left", valign="top")
-        l.bind(size=lambda w, *_: setattr(w, "text_size", (w.width, w.height)))
-        self.monos.append(l)
-        return l
+    def _caja_ro(self):
+        t = TextInput(multiline=False, readonly=True, size_hint_y=None,
+                      height=dp(46), hint_text="--", font_size="18sp")
+        self.readonly.append(t)
+        return t
 
     def _fila_bits(self, destino, editable):
         fila = BoxLayout(size_hint_y=None, height=dp(60), spacing=dp(4))
-        for numero in (78, 79, 80, 81, 82):
+        for numero in range(1, 6):
             celda = BoxLayout(orientation="vertical")
             celda.add_widget(self._lbl(f"bit {numero}", dp(20), "12sp"))
             cb = CheckBox(disabled=True)
@@ -222,37 +216,19 @@ class Interfaz(BoxLayout):
         self.boton_tema.text = "Modo claro" if self.tema == "oscuro" else "Modo oscuro"
         for l in self.labels:
             l.color = t["texto"]
-        for m in self.monos:
-            m.color = t["mono"]
         for inp in self.inputs:
             inp.background_color = t["in_bg"]
             inp.foreground_color = t["in_txt"]
             inp.hint_text_color = (0.5, 0.5, 0.5, 1)
+        for ro in self.readonly:
+            ro.background_color = t["ro_bg"]
+            ro.foreground_color = t["ro_txt"]
         for cb in self.checks:
             cb.color = t["texto"]
         self.salida.background_color = t["caja"]
         self.salida.foreground_color = t["caja_txt"]
 
-    # --- sector 1 (comparación en vivo) ---
-    def _fmt(self, bs):
-        return " ".join(f"{b:02X}" for b in bs)
-
-    def _actualizar_sector1(self, *_):
-        if not getattr(self, "sector1_ok", False):
-            return
-        self.mono_orig.text = self._fmt(self._bloque_s1)
-        txt = self.valor_byte4.text.strip()
-        if txt == "":
-            self.mono_nuevo.text = self._fmt(self._bloque_s1)
-            return
-        try:
-            v = logica.leer_entero(txt, 0, 63)
-            nuevo, _, _ = logica.aplicar_byte4(self._bloque_s1, v)
-            self.mono_nuevo.text = self._fmt(nuevo)
-        except ValueError:
-            self.mono_nuevo.text = "(valor 0-63)"
-
-    # --- sector 3 (carga de bits) ---
+    # --- sector 3 ---
     def valor_bits_actual(self):
         valor = 0
         for i, cb in enumerate(self.bits_cb):
@@ -267,18 +243,19 @@ class Interfaz(BoxLayout):
         self.resumen_bits.text = f"Valor = {v}  ({format(v, '05b')} binario)"
 
     def _cargar_estado(self):
-        # Sector 1, bloque 1
         dump = logica.DumpMCT(self.contenido)
+        # Sector 1, bloque 1 -> valor del 5º byte
         b1 = dump.get_bloque(1, 1)
         if b1 is not None and b1.strip("-") != "":
-            self._bloque_s1 = logica._bloque_a_bytes(b1)
+            valor = logica._bloque_a_bytes(b1)[logica.IDX_VALOR]
+            self.valor_orig.text = str(valor)
+            self.valor_byte4.text = str(valor)
             self.sector1_ok = True
-            self._actualizar_sector1()
         else:
+            self.valor_orig.text = "sin leer"
+            self.valor_byte4.text = ""
             self.sector1_ok = False
-            self.mono_orig.text = "sin leer"
-            self.mono_nuevo.text = "sin leer"
-        # Sector 3, bloque 0
+        # Sector 3, bloque 0 -> 5 bits
         b3 = dump.get_bloque(3, 0)
         if b3 is not None and b3.strip("-") != "":
             valor = logica.valor_bits_de_bloque(logica._bloque_a_bytes(b3))

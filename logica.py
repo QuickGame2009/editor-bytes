@@ -59,18 +59,22 @@ def aplicar_byte4(bloque_bytes, valor):
     return b, crc16, crc_byte
 
 
+# Campo de 5 bits, desplazado un byte respecto a la numeración 78-82
+# (igual que el valor del sector 1, que pasó del 4º al 5º byte).
+DESP_BITS = 128 - 82 - 8
+
+
 def valor_bits_de_bloque(bloque_bytes):
-    """Devuelve el valor actual (0-31) de los bits 78-82 del bloque."""
+    """Devuelve el valor actual (0-31) del campo de 5 bits del bloque."""
     numero = int.from_bytes(bloque_bytes, byteorder="big")
-    return (numero >> (128 - 82)) & 0b11111
+    return (numero >> DESP_BITS) & 0b11111
 
 
 def aplicar_bits(bloque_bytes, valor):
-    """Escribe el valor (0-31) en los bits 78-82 del bloque de 128 bits."""
+    """Escribe el valor (0-31) en el campo de 5 bits del bloque de 128 bits."""
     numero = int.from_bytes(bloque_bytes, byteorder="big")
-    desplazamiento = 128 - 82
-    mascara = 0b11111 << desplazamiento
-    numero = (numero & ~mascara) | (valor << desplazamiento)
+    mascara = 0b11111 << DESP_BITS
+    numero = (numero & ~mascara) | (valor << DESP_BITS)
     return bytearray(numero.to_bytes(16, byteorder="big"))
 
 
@@ -135,7 +139,7 @@ def procesar_dump(texto, valor_byte4=None, valor_bits=None):
     log = []
 
     if valor_byte4 is not None and str(valor_byte4).strip() != "":
-        valor = leer_entero(valor_byte4, 0, 63)
+        valor = leer_entero(valor_byte4, 0, 127)
         origen = _exigir_bloque(dump, 1, 1)
         nuevo, crc16, crc_byte = aplicar_byte4(origen, valor)
         hexs = nuevo.hex().upper()
